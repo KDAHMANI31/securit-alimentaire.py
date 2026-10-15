@@ -303,7 +303,7 @@ GFS_CHECKLIST = {
     ],
 }
 
-# Barre latérale : Navigation
+# Barre latérale : Navigation simple
 st.sidebar.header("📋 Navigation Audit")
 selected_category = st.sidebar.radio(
     "Choisir la catégorie :", list(GFS_CHECKLIST.keys())
@@ -340,7 +340,7 @@ for code, consigne, pts in GFS_CHECKLIST[selected_category]:
                 "Observations / Action corrective",
                 value=current_comm,
                 key=key_comm,
-                placeholder="Ex: Température relevée 7.5°C, produit jeté...",
+                placeholder="Ex: Température relevée 7.5°C...",
             )
 
         # Mettre à jour l'état du contrôle dans session_state
@@ -361,4 +361,149 @@ def generate_styled_excel(data_dict):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Rapport Audit GFS"
-    ws.views.sheetView[0].showGrid
+    ws.views.sheetView[0].showGridLines = True
+
+    # Couleurs et Styles
+    HEADER_BG = "1F4E78"  # Bleu Foncé Elegant
+    HEADER_FG = "FFFFFF"  # Blanc
+    ZEBRA_BG = "F2F5F9"  # Gris-Bleu très clair
+
+    font_title = Font(name="Segoe UI", size=16, bold=True, color="1F4E78")
+    font_header = Font(name="Segoe UI", size=11, bold=True, color=HEADER_FG)
+    font_data = Font(name="Segoe UI", size=10)
+
+    fill_header = PatternFill(
+        start_color=HEADER_BG, end_color=HEADER_BG, fill_type="solid"
+    )
+    fill_zebra = PatternFill(
+        start_color=ZEBRA_BG, end_color=ZEBRA_BG, fill_type="solid"
+    )
+
+    # Couleurs de Statut
+    fill_oui = PatternFill(
+        start_color="D9EAD3", end_color="D9EAD3", fill_type="solid"
+    )  # Vert clair
+    fill_non = PatternFill(
+        start_color="FCE5CD", end_color="FCE5CD", fill_type="solid"
+    )  # Orange/Rouge clair
+    fill_na = PatternFill(
+        start_color="EFEFEF", end_color="EFEFEF", fill_type="solid"
+    )  # Gris clair
+
+    font_oui = Font(name="Segoe UI", size=10, bold=True, color="274E13")
+    font_non = Font(name="Segoe UI", size=10, bold=True, color="783F04")
+    font_na = Font(name="Segoe UI", size=10, bold=True, color="666666")
+
+    thin_border = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+
+    # Titre du Rapport
+    ws.merge_cells("A1:F1")
+    ws["A1"] = "RAPPORT D'AUDIT GLOBAL FOOD SAFETY (GFS)"
+    ws["A1"].font = font_title
+    ws["A1"].alignment = Alignment(vertical="center")
+
+    ws["A2"] = f"Date de l'audit : {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws["A2"].font = Font(name="Segoe UI", size=10, italic=True, color="595959")
+
+    # En-têtes du Tableau
+    headers = [
+        "Catégorie",
+        "Code",
+        "Consigne de Contrôle",
+        "Pts",
+        "Statut",
+        "Observations / Actions Correctives",
+    ]
+    ws.append([])  # Ligne 3 vide
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=4, column=col_idx, value=header)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+
+    # Remplissage des données
+    row_idx = 5
+    for cat, items in GFS_CHECKLIST.items():
+        for code, consigne, pts in items:
+            ans = data_dict.get(
+                code,
+                {
+                    "Statut": "Non évalué",
+                    "Commentaire": "",
+                },
+            )
+            statut = ans.get("Statut", "Oui")
+            commentaire = ans.get("Commentaire", "")
+
+            c_cat = ws.cell(row=row_idx, column=1, value=cat)
+            c_code = ws.cell(row=row_idx, column=2, value=code)
+            c_cons = ws.cell(row=row_idx, column=3, value=consigne)
+            c_pts = ws.cell(row=row_idx, column=4, value=pts)
+            c_stat = ws.cell(row=row_idx, column=5, value=statut)
+            c_comm = ws.cell(row=row_idx, column=6, value=commentaire)
+
+            for cell in [c_cat, c_code, c_cons, c_pts, c_stat, c_comm]:
+                cell.font = font_data
+                cell.border = thin_border
+                cell.alignment = Alignment(vertical="center")
+                if row_idx % 2 == 0:
+                    cell.fill = fill_zebra
+
+            c_code.alignment = Alignment(horizontal="center", vertical="center")
+            c_pts.alignment = Alignment(horizontal="center", vertical="center")
+            c_stat.alignment = Alignment(horizontal="center", vertical="center")
+
+            if statut == "Oui":
+                c_stat.fill = fill_oui
+                c_stat.font = font_oui
+            elif statut == "Non":
+                c_stat.fill = fill_non
+                c_stat.font = font_non
+            elif statut == "N/A":
+                c_stat.fill = fill_na
+                c_stat.font = font_na
+
+            row_idx += 1
+
+    column_widths = {
+        "A": 25,
+        "B": 15,
+        "C": 55,
+        "D": 8,
+        "E": 12,
+        "F": 45,
+    }
+    for col_letter, width in column_widths.items():
+        ws.column_dimensions[col_letter].width = width
+
+    output = BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
+# ---------------------------------------------------------
+# BOUTON DE TÉLÉCHARGEMENT DIRECT SUR LA PAGE PRINCIPALE
+# ---------------------------------------------------------
+st.markdown("---")
+st.subheader("📥 Exportation du Rapport d'Audit")
+st.write(
+    "Cliquez sur le bouton ci-dessous pour télécharger votre rapport Excel"
+    " mis en forme et coloré :"
+)
+
+excel_data = generate_styled_excel(st.session_state.answers)
+
+st.download_button(
+    label="📊 Télécharger le Rapport Excel Coloré",
+    data=excel_data,
+    file_name=f"Rapport_Audit_GFS_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
