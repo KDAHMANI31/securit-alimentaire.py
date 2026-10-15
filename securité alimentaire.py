@@ -12,7 +12,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🍽️ Audit Global Food Safety (GFS) - Marriott")
+st.title("🍽️ Audit Global Food Safety (GFS) ")
 st.markdown(
     "**Plateforme de contrôle d'hygiène et de sécurité des aliments**"
 )
