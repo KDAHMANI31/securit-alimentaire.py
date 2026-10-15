@@ -1,180 +1,364 @@
 from datetime import datetime
 from io import BytesIO
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Plateforme de Contrôle GFS", layout="wide"
+    page_title="Audit GFS - Sécurité Alimentaire",
+    page_icon="🍽️",
+    layout="wide",
 )
 
-st.title("🍽️ Plateforme de Contrôle - Global Food Safety Audit (GFS)")
-st.sidebar.header("Navigation")
-
-# Initialisation de l'historique des contrôles dans la session
-if "evaluations" not in st.session_state:
-    st.session_state.evaluations = []
-
-# Sélection du module / section
-section = st.sidebar.selectbox(
-    "Choisir une section",
-    [
-        "Documentation",
-        "Locaux (Facilities)",
-        "Manipulation des aliments",
-        "Hygiène personnelle",
-    ],
+st.title("🍽️ Audit Global Food Safety (GFS) - Marriott")
+st.markdown(
+    "**Plateforme de contrôle d'hygiène et de sécurité des aliments**"
 )
 
+# Initialisation des réponses dans la session
+if "answers" not in st.session_state:
+    st.session_state.answers = {}
 
-# Fonction pour afficher une consigne avec choix (Oui/Non/N/A) et champ de commentaire
-def render_question(q_id, question_text):
-    st.markdown(f"**{question_text}**")
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        statut = st.radio(
-            "Conformité",
-            ["Oui", "Non", "N/A"],
-            horizontal=True,
-            key=f"status_{q_id}",
-        )
-    with col2:
-        commentaire = st.text_input(
-            "Observations / Action corrective",
-            key=f"comm_{q_id}",
-            placeholder="Précisez l'anomalie ou l'action...",
-        )
-    st.markdown("---")
-    return {"id": q_id, "question": question_text, "statut": statut, "commentaire": commentaire}
-
-
-# Formulaire selon la section
-form_data = []
-
-if section == "Documentation":
-    st.header("📂 Sécurité sanitaire des aliments : Documentation")
-    form_data.append(
-        render_question(
+# ---------------------------------------------------------
+# DÉFINITION COMPLÈTE DES 43 POINTS DE CONTRÔLE DU PDF GFS
+# ---------------------------------------------------------
+GFS_CHECKLIST = {
+    "FS-Documentation": [
+        (
             "FSDOC001",
-            "1. Les procédures de notification des intoxications alimentaires sont documentées et accessibles.",
-        )
-    )
-    form_data.append(
-        render_question(
+            "1. Les procédures de notification des intoxications alimentaires"
+            " de l'année en cours sont documentées et accessibles.",
+            2,
+        ),
+        (
             "FSDOC002",
-            "2. Le document de formation des employés (manipulateurs) est en cours de validité.",
-        )
-    )
-    form_data.append(
-        render_question(
+            "2. Le document attestant que les employés qui manipulent des"
+            " aliments ont été formés à la sécurité sanitaire des aliments est"
+            " en cours de validité.",
+            2,
+        ),
+        (
             "FSDOC003",
-            "3. Les responsables ont reçu une certification après avoir suivi un programme approuvé.",
-        )
-    )
-    form_data.append(
-        render_question(
-            "FSDOC004", "4. Un programme de lutte contre les nuisibles est en place."
-        )
-    )
-
-elif section == "Locaux (Facilities)":
-    st.header("🏗️ Sécurité sanitaire des aliments : Locaux")
-    form_data.append(
-        render_question(
+            "3. Les responsables ont reçu une certification après avoir suivi un"
+            " programme approuvé.",
+            2,
+        ),
+        (
+            "FSDOC004",
+            "4. Un programme de lutte contre les nuisibles a été adopté et mis"
+            " en place (pas de présence de nuisibles).",
+            2,
+        ),
+        (
+            "FSDOC005",
+            "5. Les formulaires d'enregistrement des températures du"
+            " réfrigérateur/congélateur (HACCP A-3) sont renseignés et"
+            " conservés pendant 90 jours.",
+            2,
+        ),
+        (
+            "FSDOC006",
+            "6. Les formulaires d'enregistrement des températures (HACCP A-1)"
+            " pour la cuisson, la conservation et le réchauffage sont"
+            " conservés pendant 90 jours.",
+            16,
+        ),
+        (
+            "FSDOC007",
+            "7. Les formulaires d'enregistrement du refroidissement des"
+            " aliments (HACCP A-2) sont renseignés et conservés pendant 90"
+            " jours.",
+            16,
+        ),
+        (
+            "FSDOC009",
+            "8. Les fiches de suivi du nettoyage des postes de travail sont"
+            " renseignées et conservées pendant 90 jours.",
+            16,
+        ),
+    ],
+    "FS-Facilities (Locaux)": [
+        (
             "FSFAC001",
-            "10. Les systèmes d'aération et hottes sont nettoyés par des professionnels.",
-        )
-    )
-    form_data.append(
-        render_question(
-            "FSFAC002",
-            "12. Les sols, murs et plafonds sont propres (pas de poussière, débris, eau stagnante).",
-        )
-    )
-    form_data.append(
-        render_question(
+            "9. Les systèmes d'aération et hottes de ventilation de la cuisine"
+            " sont nettoyés et entretenus par des professionnels (tous les 6"
+            " mois).",
+            2,
+        ),
+        (
+            "CABFS102",
+            "10. Les machines à glaçons sont propres et en bon état (sans"
+            " moisissure, rouille ou saleté).",
+            2,
+        ),
+        (
             "FSFAC003",
-            "22. Les aliments et emballages sont stockés à au moins 15 cm du sol.",
-        )
-    )
-
-elif section == "Manipulation des aliments":
-    st.header("🥩 Sécurité sanitaire des aliments : Manipulation des aliments")
-    form_data.append(
-        render_question(
+            "11. Les sols, les murs et les plafonds sont propres et ne"
+            " présentent pas de traces de poussière, de débris ou d'eau"
+            " stagnante.",
+            2,
+        ),
+        (
+            "FSFAC004",
+            "12. Les sols, les murs et les plafonds sont facilement"
+            " nettoyables et en bon état.",
+            2,
+        ),
+        (
+            "FSFAC005",
+            "13. Le système de ventilation est adapté (bouches d'aération,"
+            " grilles et filtres propres).",
+            2,
+        ),
+        (
+            "FSFAC006",
+            "14. Les espaces de livraison et d'entrée sont protégés contre les"
+            " insectes et les rongeurs.",
+            2,
+        ),
+        (
+            "FSFAC007",
+            "15. Les espaces réservés aux poubelles sont toujours propres et"
+            " bien organisés.",
+            2,
+        ),
+        (
+            "FSFAC008",
+            "16. Les espaces réservés aux employés (cafétéria/cantine/salle de"
+            " pause) sont propres et bien entretenus.",
+            4,
+        ),
+        (
+            "FSFAC009",
+            "17. Un espace est dédié au lavage des mains dans les aires de"
+            " manipulation des aliments (eau chaude à 38°C, savon, essuie-mains"
+            " jetable).",
+            2,
+        ),
+        (
+            "CABFS105",
+            "18. Les lave-vaisselle sont correctement entretenus et utilisés"
+            " (désinfection à 71°C ou dosage chimique correct).",
+            4,
+        ),
+        (
+            "FSFAC011",
+            "19. Les produits chimiques sont utilisés et stockés selon les"
+            " normes (étiquetage, séparation des aliments).",
+            2,
+        ),
+        (
+            "FSFAC012",
+            "20. Les bacs de plonge et de désinfection de l'équipement et des"
+            " ustensiles sont correctement entretenus.",
+            2,
+        ),
+        (
+            "FSFAC013",
+            "21. Les aliments et emballages alimentaires sont correctement"
+            " stockés à au moins 15 cm du sol.",
+            2,
+        ),
+        (
+            "FSFAC014",
+            "22. La méthode FIFO (Premier Entré - Premier Sorti) est appliquée"
+            " dans les aires de production et de stockage.",
+            2,
+        ),
+        (
+            "FSFAC015",
+            "23. La température des réfrigérateurs (<= 5°C) et congélateurs"
+            " (<= -15°C) respecte la norme.",
+            16,
+        ),
+        (
+            "CABFS103",
+            "24. Les aliments froids à risque sont maintenus à une température"
+            " <= 5°C dans tous les systèmes de conservation.",
+            16,
+        ),
+        (
+            "FSFAC017",
+            "25. Les aliments chauds à risque sont maintenus à une température"
+            " >= 57°C dans tous les systèmes de conservation.",
+            16,
+        ),
+    ],
+    "FS-Food Handling (Manipulation des aliments)": [
+        (
             "FSFH001",
-            "31. Les aliments et surfaces sont protégés des dangers microbiologiques, physiques et chimiques.",
-        )
-    )
-    form_data.append(
-        render_question(
-            "FSFH002", "32. Les aliments à risque sont décongelés selon les règles."
-        )
-    )
-
-elif section == "Hygiène personnelle":
-    st.header("🧼 Sécurité sanitaire des aliments : Hygiène personnelle")
-    form_data.append(
-        render_question(
+            "26. Les employés qui manipulent les aliments connaissent les"
+            " températures de cuisson standard (ex: volaille 74°C, viande hachée"
+            " 68°C).",
+            2,
+        ),
+        (
+            "FSFH015",
+            "27. Les steaks hachés frais ou surgelés respectent les normes"
+            " microbiologiques et de cuisson à cœur.",
+            4,
+        ),
+        (
+            "FSFH003",
+            "28. Les aliments proviennent de fournisseurs commerciaux agréés"
+            " (étiquettes de fruits de mer conservées 90 jours).",
+            2,
+        ),
+        (
+            "FSFH004",
+            "29. La date limite de conservation (max 7 jours) est indiquée au"
+            " moment de la préparation sur les aliments à risque prêts à"
+            " consommer.",
+            2,
+        ),
+        (
+            "FSFH005",
+            "30. Les produits alimentaires ne sont pas conservés ou servis"
+            " au-delà de leur date limite de consommation.",
+            2,
+        ),
+        (
+            "FSFH006",
+            "31. Les aliments et surfaces sont protégés des dangers"
+            " microbiologiques, physiques et chimiques (pas de viandes crues"
+            " au-dessus des cuits).",
+            4,
+        ),
+        (
+            "FSFH007",
+            "32. Les aliments à risque sont décongelés selon les règles"
+            " (au froid <= 5°C ou sous eau courante <= 21°C).",
+            2,
+        ),
+        (
+            "FSFH008",
+            "33. Les ustensiles en cours d'utilisation (y compris pelles à"
+            " glace) sont manipulés et stockés de manière hygiénique.",
+            2,
+        ),
+        (
+            "CABFS106",
+            "34. Les directives relatives aux planches à découper respectent"
+            " le code couleur et les normes.",
+            4,
+        ),
+        (
+            "FSFH010",
+            "35. Les surfaces en contact avec les aliments (équipement/ustensiles)"
+            " sont durables, non toxiques, nettoyables et en bon état.",
+            2,
+        ),
+        (
+            "FSFH011",
+            "36. L'équipement et les ustensiles sont correctement nettoyés"
+            " (joints, poignées, étagères, rails).",
+            2,
+        ),
+        (
+            "FSFH012",
+            "37. Les surfaces qui ne sont pas en contact direct avec les"
+            " aliments sont propres et en bon état.",
+            2,
+        ),
+        (
+            "FSFH013",
+            "38. Les solutions de désinfection chimique sont utilisées à la"
+            " bonne concentration et température.",
+            4,
+        ),
+        (
+            "FSFH014",
+            "39. Des kits de test (bandelettes) pour désinfectant sont"
+            " facilement accessibles.",
+            4,
+        ),
+    ],
+    "FS-Personal Hygiene (Hygiène personnelle)": [
+        (
             "FSPH001",
-            "39. Les employés se lavent fréquemment et correctement les mains.",
-        )
-    )
-    form_data.append(
-        render_question(
+            "40. Les employés se lavent fréquemment et correctement les"
+            " mains aux moments clés.",
+            16,
+        ),
+        (
             "FSPH002",
-            "40. Aucun contact à mains nues n'a été constaté avec les produits prêts à consommer.",
-        )
-    )
+            "41. Aucun contact à mains nues n'a été constaté avec les aliments"
+            " prêts à consommer.",
+            4,
+        ),
+        (
+            "FSPH003",
+            "42. Les employés présentant des symptômes contagieux sont exclus/restreints"
+            " et les consignes sont affichées.",
+            4,
+        ),
+        (
+            "FSPH004",
+            "43. Il est interdit de boire, manger ou fumer dans les aires où"
+            " sont manipulés les aliments.",
+            2,
+        ),
+    ],
+}
 
-# Bouton pour enregistrer les données de la section
-if st.button("Enregistrer les contrôles de cette section"):
-    date_jour = datetime.now().strftime("%Y-%m-%d %H:%M")
-    for item in form_data:
-        st.session_state.evaluations.append(
-            {
-                "Date": date_jour,
-                "Section": section,
-                "Référence": item["id"],
-                "Consigne": item["question"],
-                "Statut": item["statut"],
-                "Commentaire": item["commentaire"],
-            }
-        )
-    st.success("Données enregistrées avec succès pour cette section !")
+# Barre latérale : Navigation
+st.sidebar.header("📋 Navigation Audit")
+selected_category = st.sidebar.radio(
+    "Choisir la catégorie :", list(GFS_CHECKLIST.keys())
+)
 
-# Section Exportation des résultats
-st.sidebar.markdown("---")
-st.sidebar.subheader("📥 Exportation du Rapport")
+# Formulaire principal
+st.header(f"Section : {selected_category}")
+st.write("Évaluez chaque point de contrôle ci-dessous :")
 
-if len(st.session_state.evaluations) > 0:
-    df_resultats = pd.DataFrame(st.session_state.evaluations)
+for code, consigne, pts in GFS_CHECKLIST[selected_category]:
+    with st.container():
+        col1, col2, col3 = st.columns([4, 2, 3])
+        with col1:
+            st.markdown(f"**[{code}]** {consigne}")
+            st.caption(f"Pondération : **{pts} Pts**")
+        with col2:
+            key_status = f"status_{code}"
+            current_status = st.session_state.answers.get(
+                code, {}
+            ).get("statut", "Oui")
+            status = st.radio(
+                "Statut",
+                ["Oui", "Non", "N/A"],
+                index=["Oui", "Non", "N/A"].index(current_status),
+                key=key_status,
+                horizontal=True,
+            )
+        with col3:
+            key_comm = f"comm_{code}"
+            current_comm = st.session_state.answers.get(
+                code, {}
+            ).get("commentaire", "")
+            commentaire = st.text_input(
+                "Observations / Action corrective",
+                value=current_comm,
+                key=key_comm,
+                placeholder="Ex: Température relevée 7.5°C, produit jeté...",
+            )
 
-    # Affichage d'un aperçu dans l'application
-    with st.expander("Voir le tableau récapitulatif des contrôles"):
-        st.dataframe(df_resultats)
+        # Mettre à jour l'état du contrôle dans session_state
+        st.session_state.answers[code] = {
+            "Catégorie": selected_category,
+            "Code": code,
+            "Consigne": consigne,
+            "Points": pts,
+            "Statut": status,
+            "Commentaire": commentaire,
+        }
+        st.markdown("---")
 
-    # Export Excel avec openpyxl
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_resultats.to_excel(writer, index=False, sheet_name="Rapport_GFS")
-    excel_data = output.getvalue()
-
-    st.sidebar.download_button(
-        label="Télécharger le rapport en Excel (.xlsx)",
-        data=excel_data,
-        file_name=f"Rapport_GFS_{datetime.now().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-    # Export CSV
-    csv_data = df_resultats.to_csv(index=False).encode("utf-8")
-    st.sidebar.download_button(
-        label="Télécharger le rapport en CSV",
-        data=csv_data,
-        file_name=f"Rapport_GFS_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv",
-    )
-else:
-    st.sidebar.info(
-        "Effectuez et enregistrez des contrôles pour activer l'exportation."
-    )
+# ---------------------------------------------------------
+# FONCTION DE GÉNÉRATION EXCEL COLORÉ ET DESIGN
+# ---------------------------------------------------------
+def generate_styled_excel(data_dict):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rapport Audit GFS"
+    ws.views.sheetView[0].showGrid
